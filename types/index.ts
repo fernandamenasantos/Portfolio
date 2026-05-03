@@ -1,4 +1,5 @@
 export type Category = 'all' | 'character' | 'environment' | 'prop' | 'concept';
+export type DisplayMode = 'shaded' | 'wireframe' | 'clay';
 
 export interface MeshInfo {
   name: string;

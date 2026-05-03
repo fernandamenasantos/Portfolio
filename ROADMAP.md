@@ -111,6 +111,30 @@ El parámetro `category` cambió de `string` a `Category`, reforzando el tipado 
 
 ---
 
+## Contenido / Assets
+
+### Proyecto activo: Escena de Café
+El primer proyecto real es una escena de café. La estrategia de contenido:
+
+| Estado | Archivo | Descripción |
+|---|---|---|
+| ✅ Carpeta lista | `public/models/cafe-lamp.glb` | ← soltar aquí el modelo de la lámpara |
+| ✅ Carpeta lista | `public/thumbnails/cafe-lamp.jpg` | ← soltar aquí la foto de la lámpara |
+| 🔜 Futuro | `public/models/cafe-scene.glb` | Escena completa del café |
+| 🔜 Futuro | `public/thumbnails/cafe-scene.jpg` | Thumbnail de la escena completa |
+
+**Workflow para agregar la escena completa (objetivo final):**
+1. Exportar el GLB desde Blender con todos los objetos **nombrados** (Lamp, Counter, Chair_01, etc.)
+2. Abrir el visor en el browser, hacer clic en cada malla — su nombre aparece en el `MeshInfoPanel`
+3. Llenar `meshInfo` en `data/projects.ts` con esos nombres exactos para activar la interactividad por malla
+
+**Workflow para agregar nuevos proyectos:**
+1. Soltar el `.glb` en `public/models/` y el thumbnail en `public/thumbnails/`
+2. Agregar una entrada al array `projects` en `data/projects.ts`
+3. `meshInfo` es opcional — sin él el modelo carga y rota pero no tiene info por pieza
+
+---
+
 ## Bugs conocidos (pendientes)
 
 ### ~~MENOR — Sin manejo de error si el modelo 404 o está corrupto~~ ✅ FIXED
@@ -120,27 +144,20 @@ Se creó `ViewerErrorBoundary` (class component) que envuelve el `<Canvas>`. Cap
 
 ---
 
-### MENOR — Archivos de ejemplo inexistentes en `public/`
-**Descripción:** `data/projects.ts` referencia 4 modelos `.glb` y 6 thumbnails que no existen en `public/`. Al correr el sitio todas las imágenes están rotas y los visores 3D fallan.
-
-**Fix:** Crear las carpetas y agregar placeholders:
-```
-public/models/     ← crear carpeta
-public/thumbnails/ ← crear carpeta + imágenes placeholder
-```
-O limpiar `data/projects.ts` y dejar solo un proyecto de ejemplo con archivos reales.
+### ~~MENOR — Archivos de ejemplo inexistentes en `public/`~~ ✅ FIXED
+Carpetas `public/models/` y `public/thumbnails/` creadas. `data/projects.ts` limpiado — solo contiene el proyecto real `cafe-lamp`. Pendiente: soltar los archivos reales en las carpetas.
 
 ---
 
-### MENOR — Mallas sin nombre rompen el reset de color
-**Archivo:** `components/viewer/InteractiveModel.tsx`
+### ~~MENOR — Mallas sin nombre rompen el reset de color~~ ✅ FIXED
+El clone traverse ahora asigna un ID único (`mesh_<random>`) a cualquier malla sin nombre antes de guardarla en `originalProps`.
 
-**Descripción:** Si un GLB contiene mallas con `name: ''` (sin nombre), `originalColors.current.get('')` puede devolver el color de otra malla sin nombre, corrompiendo el reset de highlight.
+---
 
-**Fix:** Ignorar mallas sin nombre en el traverse del clone, o generarles un ID único:
-```typescript
-if (!mesh.name) mesh.name = `mesh_${Math.random().toString(36).slice(2)}`;
-```
+### MENOR — Modelo se ve blanco (materiales sin textura embedida)
+**Descripción:** El GLB exportado desde Blender no tiene texturas embedidas. El modelo carga con los materiales blancos/sin color.
+
+**Fix (en Blender):** Al exportar GLB: `File → Export → glTF 2.0`, en el panel de opciones activar **Include → Textures** y asegurarse de que los materiales usen nodos con imagen conectada. Opción alternativa: en `InteractiveModel.tsx`, agregar una luz fill más intensa o cambiar el environment preset por defecto del proyecto.
 
 ---
 
@@ -156,19 +173,22 @@ if (!mesh.name) mesh.name = `mesh_${Math.random().toString(36).slice(2)}`;
 - [x] **Fix:** Eliminar `cardRef` muerto en `ProjectCard`
 - [x] **Fix:** Tipado estricto en `getProjectsByCategory`
 - [x] **Fix:** `ErrorBoundary` alrededor del viewer 3D (`ViewerErrorBoundary`)
-- [ ] **Fix:** Mallas sin nombre en raycasting
-- [ ] Crear `public/models/` y `public/thumbnails/` con un modelo de prueba real
-- [ ] Reemplazar datos de ejemplo en `projects.ts` con proyectos reales de Fer
+- [x] **Fix:** Mallas sin nombre en raycasting (ID único automático en clone)
+- [x] Crear `public/models/` y `public/thumbnails/`
+- [~] Agregar primer proyecto real (`cafe-lamp`) — **pendiente: soltar los archivos en las carpetas**
+- [ ] Agregar proyectos restantes de Fer en `data/projects.ts`
 - [ ] Crear una página `/404` personalizada
 
 ---
 
 ### Fase 2 — UX del visor (media prioridad)
 
+- [ ] **Escena completa del café como un solo proyecto** — exportar el GLB con todos los objetos nombrados, rellenar `meshInfo` con cada malla seleccionable (Lamp, Counter, Chair, etc.). El sistema actual ya soporta esto sin cambios de código.
 - [ ] **Galería de imágenes por proyecto** — el campo `images` ya está en el tipo `Project` pero no tiene UI. Agregar un carrusel/grid en el sidebar del visor para renders adicionales.
 - [ ] **Indicador de progreso de carga** — reemplazar el spinner por una barra de progreso usando `useProgress` de Drei, que muestra el porcentaje real de descarga del GLB.
 - [ ] **Autorotate toggle** — botón en el visor para activar rotación automática del modelo.
-- [ ] **Wireframe toggle** — botón que cambia todos los materiales a `wireframe: true`.
+- [x] **Modos de visualización** — selector Shaded / Wireframe / Clay en la esquina superior derecha del visor (`DisplayModeSelector`). Wireframe usa `EdgesGeometry` (solo aristas reales, sin diagonales de triángulos), Clay sobreescribe con tono mate neutro, Shaded restaura materiales originales. El modo se resetea al navegar entre proyectos.
+- [x] **Auto-centrado de modelos** — bounding box centering en el clone useEffect. Cualquier GLB se centra automáticamente en el origen para que OrbitControls siempre encuadre el modelo correctamente.
 - [ ] **Screenshot** — botón que llama a `gl.domElement.toDataURL()` y descarga la imagen del canvas actual.
 - [ ] **Fullscreen** — botón que pone el canvas en pantalla completa con la API nativa.
 - [ ] **Reset cámara** — botón para volver a la posición inicial de la cámara.

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SceneConfig, MeshInfo, EnvironmentPreset } from '@/types';
+import { SceneConfig, MeshInfo, EnvironmentPreset, DisplayMode } from '@/types';
 
 interface SelectedMesh {
   name: string;
@@ -12,6 +12,7 @@ interface ViewerState {
   selectedMesh: SelectedMesh | null;
   hoveredMesh: string | null;
   isLoading: boolean;
+  displayMode: DisplayMode;
 
   setEnvironment: (env: EnvironmentPreset) => void;
   setAmbientIntensity: (v: number) => void;
@@ -21,6 +22,7 @@ interface ViewerState {
   setHoveredMesh: (name: string | null) => void;
   setLoading: (v: boolean) => void;
   applySceneConfig: (config: Partial<SceneConfig>) => void;
+  setDisplayMode: (mode: DisplayMode) => void;
 }
 
 export const useViewerStore = create<ViewerState>((set) => ({
@@ -33,6 +35,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
   selectedMesh: null,
   hoveredMesh: null,
   isLoading: true,
+  displayMode: 'shaded',
 
   setEnvironment: (environment) =>
     set((s) => ({ scene: { ...s.scene, environment } })),
@@ -54,4 +57,6 @@ export const useViewerStore = create<ViewerState>((set) => ({
 
   applySceneConfig: (config) =>
     set((s) => ({ scene: { ...s.scene, ...config } })),
+
+  setDisplayMode: (displayMode) => set({ displayMode }),
 }));
