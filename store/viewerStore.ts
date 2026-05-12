@@ -11,6 +11,7 @@ interface ViewerState {
   scene: SceneConfig;
   selectedMesh: SelectedMesh | null;
   hoveredMesh: string | null;
+  isolatedMesh: string | null;   // name of the mesh currently isolated (others hidden)
   isLoading: boolean;
   displayMode: DisplayMode;
 
@@ -20,6 +21,7 @@ interface ViewerState {
   toggleBackground: () => void;
   setSelectedMesh: (mesh: SelectedMesh | null) => void;
   setHoveredMesh: (name: string | null) => void;
+  setIsolatedMesh: (name: string | null) => void;
   setLoading: (v: boolean) => void;
   applySceneConfig: (config: Partial<SceneConfig>) => void;
   setDisplayMode: (mode: DisplayMode) => void;
@@ -34,6 +36,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
   },
   selectedMesh: null,
   hoveredMesh: null,
+  isolatedMesh: null,
   isLoading: true,
   displayMode: 'shaded',
 
@@ -52,6 +55,8 @@ export const useViewerStore = create<ViewerState>((set) => ({
   setSelectedMesh: (selectedMesh) => set({ selectedMesh }),
 
   setHoveredMesh: (hoveredMesh) => set({ hoveredMesh }),
+
+  setIsolatedMesh: (isolatedMesh) => set({ isolatedMesh }),
 
   setLoading: (isLoading) => set({ isLoading }),
 

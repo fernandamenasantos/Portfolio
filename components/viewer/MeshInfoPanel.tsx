@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useViewerStore } from '@/store/viewerStore';
 
@@ -18,8 +18,9 @@ export default function MeshInfoPanel() {
   }, [setSelectedMesh]);
 
   // Calculate panel position safely (avoids direct window access in JSX)
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selectedMesh) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPanelPos({
       left: Math.min(selectedMesh.position.x + 16, window.innerWidth - 280),
       top: Math.max(selectedMesh.position.y - 60, 16),

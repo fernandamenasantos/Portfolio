@@ -35,6 +35,8 @@ export interface Project {
   thumbnail: string;
   modelPath?: string;
   images?: string[];
+  moodboard?: string[];   // reference/inspiration images
+  turnaround?: string[];  // pre-3D sketches / turnaround sheets
   tags: string[];
   year: number;
   software: string[];

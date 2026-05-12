@@ -1,11 +1,12 @@
 'use client';
 
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { useThree, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useViewerStore } from '@/store/viewerStore';
 import { MeshInfo } from '@/types';
+import { buildQuadWireframe, QUAD_WIRE_CONFIG } from './buildQuadWireframe';
 
 interface Props {
   modelPath: string;
@@ -28,92 +29,6 @@ interface WireframeLine {
   mat: THREE.LineBasicMaterial;
 }
 
-/**
- * Builds a wireframe geometry that only draws quad edges — triangulation diagonals are omitted.
- *
- * Algorithm: for each interior edge (shared by exactly 2 triangles), check if the 4 vertices
- * forming those 2 triangles are coplanar AND the edge's opposite vertices lie on opposite sides
- * of it. If so, the edge is a triangulation diagonal of a flat quad → skip it.
- * Boundary edges and non-planar feature edges are always kept.
- */
-function buildQuadWireframe(geo: THREE.BufferGeometry): THREE.BufferGeometry {
-  const posAttr = geo.attributes.position;
-  const idx = geo.index?.array;
-  if (!idx) return new THREE.WireframeGeometry(geo); // non-indexed fallback
-
-  // Build edge → [opposite vertex per adjacent triangle]
-  const edgeMap = new Map<string, { u: number; v: number; others: number[] }>();
-  const key = (a: number, b: number) => a < b ? `${a}_${b}` : `${b}_${a}`;
-
-  for (let i = 0; i < idx.length; i += 3) {
-    const [a, b, c] = [idx[i], idx[i + 1], idx[i + 2]];
-    for (const [u, v, w] of [[a, b, c], [b, c, a], [c, a, b]] as [number, number, number][]) {
-      const k = key(u, v);
-      if (!edgeMap.has(k)) edgeMap.set(k, { u, v, others: [] });
-      edgeMap.get(k)!.others.push(w);
-    }
-  }
-
-  const kept: number[] = [];
-  const vU = new THREE.Vector3();
-  const vV = new THREE.Vector3();
-  const vP = new THREE.Vector3();
-  const vQ = new THREE.Vector3();
-  const edgeDir = new THREE.Vector3();
-  const c1 = new THREE.Vector3();
-  const c2 = new THREE.Vector3();
-
-  // c1 = edgeDir × (P−U)  and  c2 = edgeDir × (Q−U) are the face normals of the
-  // two adjacent triangles (relative to the shared edge direction).
-  // For a consistently wound mesh: normalDot ≈ −cos(dihedral angle).
-  //   normalDot ≈ −1  →  dihedral ≈ 0°  (flat / smooth surface)
-  //   normalDot ≈  0  →  dihedral ≈ 90° (sharp corner)
-  //   normalDot >  0  →  dihedral > 90° (concave)
-  //
-  // A triangulation diagonal of any quad (flat OR curved) has:
-  //   • dihedral ≈ 0° on the smooth surface  →  normalDot ≈ −1
-  //   • P and Q on opposite sides of the edge
-  // Both conditions collapse into: normalDot < −THRESHOLD.
-  // We use 30°  →  THRESHOLD = cos(30°) ≈ 0.866.
-  // Edges with dihedral > 30° are kept as real feature / topology edges.
-  const SKIP_THRESHOLD = -Math.cos(30 * Math.PI / 180); // ≈ −0.866
-
-  edgeMap.forEach(({ u, v, others }) => {
-    vU.fromBufferAttribute(posAttr, u);
-    vV.fromBufferAttribute(posAttr, v);
-
-    if (others.length !== 2) {
-      kept.push(vU.x, vU.y, vU.z, vV.x, vV.y, vV.z);
-      return;
-    }
-
-    vP.fromBufferAttribute(posAttr, others[0]);
-    vQ.fromBufferAttribute(posAttr, others[1]);
-    edgeDir.subVectors(vV, vU);
-
-    c1.crossVectors(edgeDir, vP.clone().sub(vU));
-    c2.crossVectors(edgeDir, vQ.clone().sub(vU));
-
-    const c1len = c1.length();
-    const c2len = c2.length();
-    if (c1len < 1e-9 || c2len < 1e-9) {
-      kept.push(vU.x, vU.y, vU.z, vV.x, vV.y, vV.z);
-      return;
-    }
-
-    const normalDot = c1.dot(c2) / (c1len * c2len);
-    if (normalDot >= SKIP_THRESHOLD) {
-      // Significant dihedral (>30°) or same-side vertices → real edge → draw
-      kept.push(vU.x, vU.y, vU.z, vV.x, vV.y, vV.z);
-    }
-    // else: smooth surface diagonal → skip
-  });
-
-  const result = new THREE.BufferGeometry();
-  result.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
-  return result;
-}
-
 function getMat(mesh: THREE.Mesh): THREE.MeshStandardMaterial | null {
   const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
   return (mat as THREE.MeshStandardMaterial).isMeshStandardMaterial
@@ -124,18 +39,25 @@ function getMat(mesh: THREE.Mesh): THREE.MeshStandardMaterial | null {
 export default function InteractiveModel({ modelPath, meshInfo }: Props) {
   const { scene } = useGLTF(modelPath);
   const { camera, gl } = useThree();
-  const { setSelectedMesh, setHoveredMesh, hoveredMesh, setLoading, displayMode } = useViewerStore();
+  const { setSelectedMesh, setHoveredMesh, hoveredMesh, setLoading, displayMode, isolatedMesh } = useViewerStore();
 
   const originalProps = useRef<Map<string, OriginalProps>>(new Map());
   const wireframeLines = useRef<WireframeLine[]>([]);
+  const wireframeCache = useRef<Map<string, THREE.BufferGeometry>>(new Map());
   const [clonedScene, setClonedScene] = useState<THREE.Group | null>(null);
+
+  // Update cursor based on hoveredMesh
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    gl.domElement.style.cursor = hoveredMesh ? 'pointer' : 'default';
+  }, [hoveredMesh, gl]);
 
   useEffect(() => {
     setLoading(false);
   }, [scene, setLoading]);
 
   // Clone scene so original GLTF cache isn't mutated
-  useEffect(() => {
+  useLayoutEffect(() => {
     const clone = scene.clone(true);
 
     clone.traverse((obj) => {
@@ -160,6 +82,7 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
     const center = box.getCenter(new THREE.Vector3());
     clone.position.sub(center);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setClonedScene(clone);
 
     return () => {
@@ -170,6 +93,9 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
       });
       wireframeLines.current = [];
       originalProps.current.clear();
+      // Dispose and evict all cached wireframe geometries on unmount
+      wireframeCache.current.forEach((geo) => geo.dispose());
+      wireframeCache.current.clear();
       clone.traverse((obj) => {
         if (!(obj as THREE.Mesh).isMesh) return;
         const mesh = obj as THREE.Mesh;
@@ -212,8 +138,15 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
       }
 
       if (displayMode === 'wireframe') {
-        const wireGeo = buildQuadWireframe(mesh.geometry);
-        const linesMat = new THREE.LineBasicMaterial({ color: 0x5577ff });
+        // Check memoization cache before computing
+        let wireGeo: THREE.BufferGeometry;
+        if (wireframeCache.current.has(mesh.geometry.uuid)) {
+          wireGeo = wireframeCache.current.get(mesh.geometry.uuid)!;
+        } else {
+          wireGeo = buildQuadWireframe(mesh.geometry);
+          wireframeCache.current.set(mesh.geometry.uuid, wireGeo);
+        }
+        const linesMat = new THREE.LineBasicMaterial({ color: QUAD_WIRE_CONFIG.WIRE_COLOR });
         const lines = new THREE.LineSegments(wireGeo, linesMat);
         mesh.add(lines);
         wireframeLines.current.push({ lines, geo: wireGeo, mat: linesMat });
@@ -221,14 +154,32 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
     });
 
     return () => {
-      wireframeLines.current.forEach(({ lines, geo, mat }) => {
+      wireframeLines.current.forEach(({ lines, mat }) => {
         lines.parent?.remove(lines);
-        geo.dispose();
+        // NOTE: geo is NOT disposed here — it lives in wireframeCache and is reused
+        // across mode switches. Cache is cleared only when the scene unmounts.
         mat.dispose();
       });
       wireframeLines.current = [];
     };
   }, [displayMode, clonedScene]);
+
+  // Isolate a single mesh — hide all others, show only the isolated one
+  useEffect(() => {
+    if (!clonedScene) return;
+    clonedScene.traverse((obj) => {
+      if (!(obj as THREE.Mesh).isMesh) return;
+      const mesh = obj as THREE.Mesh;
+      const mat = getMat(mesh);
+      if (!mat) return;
+      if (isolatedMesh === null) {
+        // No isolation — restore visibility (display mode effect owns this, just ensure visible)
+        mat.visible = displayMode !== 'wireframe';
+      } else {
+        mat.visible = mesh.name === isolatedMesh;
+      }
+    });
+  }, [isolatedMesh, clonedScene, displayMode]);
 
   const getMeshByName = useCallback(
     (name: string): THREE.Mesh | null => {
@@ -264,14 +215,14 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
       if (hoveredMesh) resetMeshHighlight(hoveredMesh);
 
       setHoveredMesh(name);
-      gl.domElement.style.cursor = 'pointer';
+      // gl.domElement.style.cursor = 'pointer'; // Moved to useEffect
 
       const mat = getMat(e.object as THREE.Mesh);
       if (!mat) return;
       mat.emissive.copy(HOVER_COLOR);
       mat.emissiveIntensity = 0.3;
     },
-    [hoveredMesh, resetMeshHighlight, setHoveredMesh, gl]
+    [hoveredMesh, resetMeshHighlight, setHoveredMesh]
   );
 
   const handlePointerOut = useCallback(
@@ -279,9 +230,9 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
       e.stopPropagation();
       resetMeshHighlight(e.object.name);
       setHoveredMesh(null);
-      gl.domElement.style.cursor = 'default';
+      // gl.domElement.style.cursor = 'default'; // Moved to useEffect
     },
-    [resetMeshHighlight, setHoveredMesh, gl]
+    [resetMeshHighlight, setHoveredMesh]
   );
 
   const handleClick = useCallback(
@@ -313,18 +264,30 @@ export default function InteractiveModel({ modelPath, meshInfo }: Props) {
     [camera, gl, meshInfo, setSelectedMesh]
   );
 
-  const handleMissedClick = useCallback(() => {
+  const pointerDownPos = useRef<{ x: number; y: number } | null>(null);
+
+  const handlePointerDown = useCallback((e: ThreeEvent<PointerEvent>) => {
+    pointerDownPos.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleMissedClick = useCallback((e: MouseEvent) => {
+    // Ignore if the pointer moved more than 4px — it was a drag, not a click
+    if (pointerDownPos.current) {
+      const dx = e.clientX - pointerDownPos.current.x;
+      const dy = e.clientY - pointerDownPos.current.y;
+      if (Math.sqrt(dx * dx + dy * dy) > 4) return;
+    }
     setSelectedMesh(null);
     if (hoveredMesh) resetMeshHighlight(hoveredMesh);
     setHoveredMesh(null);
-    gl.domElement.style.cursor = 'default';
-  }, [setSelectedMesh, hoveredMesh, resetMeshHighlight, setHoveredMesh, gl]);
+  }, [setSelectedMesh, hoveredMesh, resetMeshHighlight, setHoveredMesh]);
 
   if (!clonedScene) return null;
 
   return (
     <primitive
       object={clonedScene}
+      onPointerDown={handlePointerDown}
       onPointerOver={handlePointerOver}
       onPointerOut={handlePointerOut}
       onClick={handleClick}

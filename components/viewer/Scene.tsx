@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { OrbitControls, Environment, ContactShadows, Grid } from '@react-three/drei';
+import { OrbitControls, Environment, ContactShadows } from '@react-three/drei';
 import { useViewerStore } from '@/store/viewerStore';
 import InteractiveModel from './InteractiveModel';
 import { MeshInfo } from '@/types';
